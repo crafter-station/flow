@@ -1,83 +1,37 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { HierarchyGraph } from "../core/hierarchy-graph";
-import type { Coordinate, GraphConfig, HierarchyNode, SizeFn } from "../types";
+import type {
+  Coordinate,
+  DragMode,
+  GraphConfig,
+  HierarchyNode,
+  NodeDragEvent,
+  PositionOverrides,
+  SizeFn,
+} from "../types";
+import { DraggableNodeContainer } from "./draggable-node-container";
 import { type EdgeConfig, EdgePath } from "./edge-path";
 import { NodeContainer } from "./node-container";
 
 export type HierarchyViewProps<T extends HierarchyNode> = {
-  /** Root node of the hierarchy */
   data: T;
-  /**
-   * Function to measure each node's size.
-   * Called for every node during layout calculation.
-   *
-   * @example
-   * ```tsx
-   * const nodeSize = (node: MyNode) => {
-   *   if (node.type === "root") return { width: 100, height: 50 };
-   *   return { width: 200, height: 80 };
-   * };
-   * ```
-   */
   nodeSize: SizeFn<T>;
-  /** Gap between nodes (default: { x: 50, y: 50 }) */
   gap?: { x: number; y: number };
-  /** Advanced layout settings */
   config?: Omit<GraphConfig, "gap" | "direction"> & {
     direction?: "vertical" | "horizontal";
   };
-  /** Edge animation config */
   edgeAnimation?: EdgeConfig;
-  /** Edge color (CSS value) */
   edgeColor?: string;
-  /** Called when a node is clicked */
   onNodeClick?: (node: T) => void;
-  /**
-   * Render function for each node.
-   *
-   * @example
-   * ```tsx
-   * renderNode={(node, parent) => (
-   *   <div className="p-4 bg-white rounded shadow">
-   *     {node.label}
-   *   </div>
-   * )}
-   * ```
-   */
   renderNode: (node: T, parent?: T) => React.ReactNode;
-  /**
-   * Optional custom edge renderer.
-   * If not provided, uses EdgePath with configured animation.
-   */
   renderEdge?: (waypoints: Coordinate[], source: T, target: T) => React.ReactNode;
+  dragMode?: DragMode;
+  positionOverrides?: PositionOverrides;
+  onNodeDragEnd?: (event: NodeDragEvent<T>) => void;
+  zoom?: number;
+  selectedNodeId?: string;
 };
 
-/**
- * Hierarchy visualization with automatic layout.
- * Computes positions for all nodes and renders them with connecting edges.
- *
- * @example
- * ```tsx
- * type MyNode = HierarchyNode & { label: string; kind: "root" | "child" };
- *
- * const data: MyNode = {
- *   id: "1",
- *   label: "Root",
- *   kind: "root",
- *   children: [
- *     { id: "2", label: "Child 1", kind: "child" },
- *     { id: "3", label: "Child 2", kind: "child" },
- *   ],
- * };
- *
- * <HierarchyView<MyNode>
- *   data={data}
- *   nodeSize={(node) => ({ width: 200, height: 80 })}
- *   renderNode={(node) => <Card>{node.label}</Card>}
- *   onNodeClick={(node) => console.log("Clicked:", node.id)}
- * />
- * ```
- */
 export function HierarchyView<T extends HierarchyNode>({
   data,
   nodeSize,
@@ -88,8 +42,16 @@ export function HierarchyView<T extends HierarchyNode>({
   renderNode,
   renderEdge,
   onNodeClick,
+  dragMode = false,
+  positionOverrides,
+  onNodeDragEnd,
+  zoom = 1,
+  selectedNodeId,
 }: HierarchyViewProps<T>) {
-  const containerRef = useRef<SVGGElement>(null);
+  const [internalOverrides, setInternalOverrides] = useState<PositionOverrides>(() => new Map());
+  const [liveDrag, setLiveDrag] = useState<{ nodeId: string; delta: Coordinate } | null>(null);
+
+  const effectiveOverrides = positionOverrides ?? internalOverrides;
 
   const graph = useMemo(
     () =>
@@ -118,10 +80,27 @@ export function HierarchyView<T extends HierarchyNode>({
 
   const allNodes = useMemo(() => graph.traverse(data), [data, graph]);
 
+  const nodeLookup = useMemo(() => {
+    const lookup = new Map<string, T>();
+    for (const node of allNodes) {
+      lookup.set(node.id, node);
+    }
+    return lookup;
+  }, [allNodes]);
+
+  const getSubtreeIds = useCallback((node: T): string[] => {
+    const ids: string[] = [node.id];
+    if (node.children) {
+      for (const child of node.children) {
+        ids.push(...getSubtreeIds(child as T));
+      }
+    }
+    return ids;
+  }, []);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<SVGGElement>) => {
       if (!onNodeClick) return;
-
       let target = e.target as HTMLElement | SVGElement;
       while (target && target !== e.currentTarget) {
         const nodeId = target.getAttribute("data-node-id");
@@ -136,7 +115,6 @@ export function HierarchyView<T extends HierarchyNode>({
     [onNodeClick, allNodes]
   );
 
-  // Register sizes for all nodes
   for (const node of allNodes) {
     const size = nodeSize(node);
     graph.registerSize(node.id, size);
@@ -144,33 +122,150 @@ export function HierarchyView<T extends HierarchyNode>({
 
   const layout = useMemo(() => graph.compute(data), [data, graph]);
 
+  const positionLookup = useMemo(() => {
+    const lookup = new Map<string, Coordinate>();
+    for (const placed of layout.nodes) {
+      const override = effectiveOverrides.get(placed.data.id);
+      lookup.set(placed.data.id, override ?? placed.position);
+    }
+    return lookup;
+  }, [layout.nodes, effectiveOverrides]);
+
+  const handleDragStart = useCallback((nodeId: string) => {
+    setLiveDrag({ nodeId, delta: { x: 0, y: 0 } });
+  }, []);
+
+  const handleDrag = useCallback((nodeId: string, delta: Coordinate) => {
+    setLiveDrag({ nodeId, delta });
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (nodeId: string, finalDelta: Coordinate) => {
+      setLiveDrag(null);
+
+      const node = nodeLookup.get(nodeId);
+      if (!node) return;
+
+      const affectedIds = dragMode === "subtree" ? getSubtreeIds(node) : [nodeId];
+      const affectedNodes = affectedIds
+        .map((id) => nodeLookup.get(id))
+        .filter((n): n is T => n !== undefined);
+
+      const basePosition = positionLookup.get(nodeId);
+      if (!basePosition) return;
+
+      const newPosition: Coordinate = {
+        x: basePosition.x + finalDelta.x,
+        y: basePosition.y + finalDelta.y,
+      };
+
+      if (!positionOverrides) {
+        setInternalOverrides((prev) => {
+          const next = new Map(prev);
+          for (const id of affectedIds) {
+            const pos = positionLookup.get(id);
+            if (pos) {
+              next.set(id, {
+                x: pos.x + finalDelta.x,
+                y: pos.y + finalDelta.y,
+              });
+            }
+          }
+          return next;
+        });
+      }
+
+      onNodeDragEnd?.({ node, affectedNodes, delta: finalDelta, newPosition });
+    },
+    [dragMode, nodeLookup, getSubtreeIds, positionLookup, positionOverrides, onNodeDragEnd]
+  );
+
+  const handleDragCancel = useCallback(() => {
+    setLiveDrag(null);
+  }, []);
+
+  const liveAffectedIds = useMemo(() => {
+    if (!liveDrag) return new Set<string>();
+    const node = nodeLookup.get(liveDrag.nodeId);
+    if (!node) return new Set<string>();
+    const ids = dragMode === "subtree" ? getSubtreeIds(node) : [liveDrag.nodeId];
+    return new Set(ids);
+  }, [liveDrag, nodeLookup, dragMode, getSubtreeIds]);
+
+  const displayEdges = useMemo(() => {
+    if (effectiveOverrides.size === 0 && !liveDrag) {
+      return layout.edges;
+    }
+
+    return graph.regenerateEdges(
+      layout.nodes.map((placed) => {
+        const basePos = positionLookup.get(placed.data.id) ?? placed.position;
+
+        if (liveDrag && liveAffectedIds.has(placed.data.id)) {
+          return {
+            ...placed,
+            position: {
+              x: basePos.x + liveDrag.delta.x,
+              y: basePos.y + liveDrag.delta.y,
+            },
+          };
+        }
+
+        return { ...placed, position: basePos };
+      })
+    );
+  }, [layout, effectiveOverrides, graph, positionLookup, liveDrag, liveAffectedIds]);
+
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: Click bubbling for node selection
-    <g ref={containerRef} onClick={handleClick}>
-      {layout.edges.map((edge) =>
-        renderEdge ? (
-          renderEdge(edge.waypoints, edge.source, edge.target)
-        ) : (
-          <EdgePath
-            key={`${edge.source.id}-${edge.target.id}`}
-            waypoints={edge.waypoints}
-            animation={edgeAnimation}
-            color={edgeColor}
-          />
-        )
-      )}
-      {layout.nodes.map((placed) => {
-        const parent = parentLookup.get(placed.data.id);
-        return (
-          <NodeContainer
-            key={placed.data.id}
-            id={placed.data.id}
-            position={placed.position}
-          >
-            {renderNode(placed.data, parent)}
-          </NodeContainer>
-        );
-      })}
+    <g onClick={handleClick}>
+      <g className="edges">
+        {displayEdges.map((edge) =>
+          renderEdge ? (
+            renderEdge(edge.waypoints, edge.source, edge.target)
+          ) : (
+            <EdgePath
+              key={`${edge.source.id}-${edge.target.id}`}
+              waypoints={edge.waypoints}
+              animation={edgeAnimation}
+              color={edgeColor}
+            />
+          )
+        )}
+      </g>
+
+      <g className="nodes">
+        {layout.nodes.map((placed) => {
+          const parent = parentLookup.get(placed.data.id);
+          const position = positionLookup.get(placed.data.id) ?? placed.position;
+          const isSelected = selectedNodeId === placed.data.id;
+
+          if (dragMode) {
+            return (
+              <DraggableNodeContainer
+                key={placed.data.id}
+                id={placed.data.id}
+                position={position}
+                draggable={true}
+                zoom={zoom}
+                selected={isSelected}
+                onDragStart={handleDragStart}
+                onDrag={handleDrag}
+                onDragEnd={handleDragEnd}
+                onDragCancel={handleDragCancel}
+              >
+                {renderNode(placed.data, parent)}
+              </DraggableNodeContainer>
+            );
+          }
+
+          return (
+            <NodeContainer key={placed.data.id} id={placed.data.id} position={position}>
+              {renderNode(placed.data, parent)}
+            </NodeContainer>
+          );
+        })}
+      </g>
     </g>
   );
 }

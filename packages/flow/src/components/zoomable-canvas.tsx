@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Coordinate } from "../types";
+import type { Coordinate, ViewState } from "../types";
 import { type ErrorBoundaryProps, ErrorBoundary } from "./error-boundary";
 import { DotGrid } from "./dot-grid";
 
@@ -14,11 +14,6 @@ const DOT_COLOR_DEFAULT = "rgba(136, 136, 136, 0.3)";
 const MAIN_BUTTON = 0;
 const DECAY = 0.92;
 const VELOCITY_THRESHOLD = 0.5;
-
-type ViewState = {
-  zoom: number;
-  pan: Coordinate;
-};
 
 export type ZoomableCanvasProps = {
   /** Minimum zoom level (default: 0.5) */
@@ -39,8 +34,10 @@ export type ZoomableCanvasProps = {
   dotClassName?: string;
   /** Display dot grid (default: true) */
   showGrid?: boolean;
-  /** Canvas content */
-  children: React.ReactNode;
+  /** Enable touch gestures - pinch to zoom, touch to pan (default: true) */
+  enableTouch?: boolean;
+  /** Canvas content - can be ReactNode or render prop receiving view state */
+  children: React.ReactNode | ((view: ViewState) => React.ReactNode);
   /** Fixed overlay (not affected by pan/zoom) */
   overlay?: React.ReactNode;
   /** Container className */
@@ -51,6 +48,10 @@ export type ZoomableCanvasProps = {
   backgroundColor?: string;
   /** Custom error fallback */
   renderError?: ErrorBoundaryProps["fallback"];
+  /** Callback when view state changes (pan or zoom) */
+  onViewChange?: (view: ViewState) => void;
+  /** Ref to access the SVG element */
+  svgRef?: React.RefObject<SVGSVGElement | null>;
 };
 
 /**
@@ -78,19 +79,30 @@ export function ZoomableCanvas({
   dotColor = DOT_COLOR_DEFAULT,
   dotClassName,
   showGrid = true,
+  enableTouch = true,
   children,
   overlay,
   className,
   svgClassName,
   backgroundColor,
   renderError,
+  onViewChange,
+  svgRef: externalSvgRef,
 }: ZoomableCanvasProps) {
-  const svgRef = useRef<SVGSVGElement>(null);
+  const internalSvgRef = useRef<SVGSVGElement>(null);
+  const svgRef = externalSvgRef ?? internalSvgRef;
   const dragging = useRef(false);
   const dragStart = useRef<Coordinate>({ x: 0, y: 0 });
   const velocity = useRef<Coordinate>({ x: 0, y: 0 });
   const lastPos = useRef<Coordinate>({ x: 0, y: 0 });
   const rafId = useRef<number | null>(null);
+
+  // Touch gesture refs
+  const touchesRef = useRef<Map<number, Coordinate>>(new Map());
+  const initialPinchDistance = useRef<number | null>(null);
+  const initialZoomOnPinch = useRef<number>(1);
+  const initialPanOnPinch = useRef<Coordinate>({ x: 0, y: 0 });
+  const pinchCenter = useRef<Coordinate>({ x: 0, y: 0 });
 
   const [view, setView] = useState<ViewState>({
     zoom: initialZoom,
@@ -98,6 +110,11 @@ export function ZoomableCanvas({
   });
 
   const transform = `translate(${view.pan.x},${view.pan.y})scale(${view.zoom})`;
+
+  // Notify parent of view changes
+  useEffect(() => {
+    onViewChange?.(view);
+  }, [view, onViewChange]);
 
   // Center view on mount
   useEffect(() => {
@@ -141,6 +158,15 @@ export function ZoomableCanvas({
   const onPointerDown = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       if (e.button !== MAIN_BUTTON) return;
+
+      // Check if click is on a draggable node - if so, don't start canvas pan
+      let target = e.target as Element | null;
+      while (target && target !== e.currentTarget) {
+        if (target.hasAttribute("data-draggable-node")) {
+          return; // Node will handle its own drag
+        }
+        target = target.parentElement;
+      }
 
       if (rafId.current !== null) {
         cancelAnimationFrame(rafId.current);
@@ -227,6 +253,155 @@ export function ZoomableCanvas({
     [minZoom, maxZoom, zoomSensitivity]
   );
 
+  // Touch handlers for pinch-to-zoom and touch panning
+  const onTouchStart = useCallback(
+    (e: React.TouchEvent<SVGSVGElement>) => {
+      if (!enableTouch) return;
+
+      // Check if touch is on a draggable node
+      let target = e.target as Element | null;
+      while (target && target !== e.currentTarget) {
+        if (target.hasAttribute("data-draggable-node")) {
+          return; // Node will handle its own drag
+        }
+        target = target.parentElement;
+      }
+
+      // Stop momentum
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+        rafId.current = null;
+      }
+      velocity.current = { x: 0, y: 0 };
+
+      // Track all touches
+      for (const touch of Array.from(e.changedTouches)) {
+        touchesRef.current.set(touch.identifier, {
+          x: touch.clientX,
+          y: touch.clientY,
+        });
+      }
+
+      if (touchesRef.current.size === 1) {
+        // Single touch - prepare for pan
+        const touch = e.touches[0];
+        dragging.current = true;
+        lastPos.current = { x: touch.clientX, y: touch.clientY };
+        dragStart.current = {
+          x: touch.clientX - view.pan.x,
+          y: touch.clientY - view.pan.y,
+        };
+      } else if (touchesRef.current.size === 2) {
+        // Two touches - prepare for pinch
+        dragging.current = false;
+        const touches = Array.from(touchesRef.current.values());
+        const [t1, t2] = touches;
+        initialPinchDistance.current = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+        initialZoomOnPinch.current = view.zoom;
+        initialPanOnPinch.current = view.pan;
+        pinchCenter.current = {
+          x: (t1.x + t2.x) / 2,
+          y: (t1.y + t2.y) / 2,
+        };
+      }
+    },
+    [enableTouch, view.pan, view.zoom]
+  );
+
+  const onTouchMove = useCallback(
+    (e: React.TouchEvent<SVGSVGElement>) => {
+      if (!enableTouch) return;
+      e.preventDefault();
+
+      // Update tracked touches
+      for (const touch of Array.from(e.changedTouches)) {
+        touchesRef.current.set(touch.identifier, {
+          x: touch.clientX,
+          y: touch.clientY,
+        });
+      }
+
+      if (touchesRef.current.size === 1 && dragging.current) {
+        // Single touch pan
+        const touch = e.touches[0];
+        velocity.current = {
+          x: touch.clientX - lastPos.current.x,
+          y: touch.clientY - lastPos.current.y,
+        };
+        lastPos.current = { x: touch.clientX, y: touch.clientY };
+
+        setView((prev) => ({
+          ...prev,
+          pan: {
+            x: touch.clientX - dragStart.current.x,
+            y: touch.clientY - dragStart.current.y,
+          },
+        }));
+      } else if (touchesRef.current.size === 2 && initialPinchDistance.current !== null) {
+        // Pinch zoom
+        const touches = Array.from(touchesRef.current.values());
+        const [t1, t2] = touches;
+        const currentDistance = Math.hypot(t2.x - t1.x, t2.y - t1.y);
+        const scale = currentDistance / initialPinchDistance.current;
+        const newZoom = Math.min(Math.max(minZoom, initialZoomOnPinch.current * scale), maxZoom);
+
+        // Calculate new pan to keep pinch center stable
+        const svg = svgRef.current;
+        if (svg) {
+          const rect = svg.getBoundingClientRect();
+          const cx = pinchCenter.current.x - rect.left;
+          const cy = pinchCenter.current.y - rect.top;
+
+          const ratio = newZoom / initialZoomOnPinch.current;
+          const newPan = {
+            x: cx - (cx - initialPanOnPinch.current.x) * ratio,
+            y: cy - (cy - initialPanOnPinch.current.y) * ratio,
+          };
+
+          setView({ zoom: newZoom, pan: newPan });
+        }
+      }
+    },
+    [enableTouch, minZoom, maxZoom, svgRef]
+  );
+
+  const onTouchEnd = useCallback(
+    (e: React.TouchEvent<SVGSVGElement>) => {
+      if (!enableTouch) return;
+
+      // Remove ended touches
+      for (const touch of Array.from(e.changedTouches)) {
+        touchesRef.current.delete(touch.identifier);
+      }
+
+      if (touchesRef.current.size === 0) {
+        // All touches ended
+        if (dragging.current) {
+          dragging.current = false;
+          // Start momentum if moving fast enough
+          if (
+            Math.abs(velocity.current.x) > VELOCITY_THRESHOLD ||
+            Math.abs(velocity.current.y) > VELOCITY_THRESHOLD
+          ) {
+            rafId.current = requestAnimationFrame(runMomentum);
+          }
+        }
+        initialPinchDistance.current = null;
+      } else if (touchesRef.current.size === 1) {
+        // Went from 2 touches to 1 - switch to pan mode
+        initialPinchDistance.current = null;
+        const remaining = Array.from(touchesRef.current.values())[0];
+        dragging.current = true;
+        lastPos.current = remaining;
+        dragStart.current = {
+          x: remaining.x - view.pan.x,
+          y: remaining.y - view.pan.y,
+        };
+      }
+    },
+    [enableTouch, runMomentum, view.pan]
+  );
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -257,8 +432,13 @@ export function ZoomableCanvas({
     width: "100%",
     height: "100%",
     cursor: "grab",
+    touchAction: "none", // Prevent browser gestures
     ...(backgroundColor ? { backgroundColor } : {}),
   };
+
+  // Resolve children - support render prop pattern
+  const resolvedChildren =
+    typeof children === "function" ? children(view) : children;
 
   return (
     <div className={className} style={containerStyle}>
@@ -271,6 +451,10 @@ export function ZoomableCanvas({
         onMouseUp={onPointerUp}
         onMouseLeave={onPointerUp}
         onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
       >
         <g transform={transform}>
           {showGrid && (
@@ -281,7 +465,7 @@ export function ZoomableCanvas({
               className={dotClassName}
             />
           )}
-          <ErrorBoundary fallback={renderError}>{children}</ErrorBoundary>
+          <ErrorBoundary fallback={renderError}>{resolvedChildren}</ErrorBoundary>
         </g>
       </svg>
 

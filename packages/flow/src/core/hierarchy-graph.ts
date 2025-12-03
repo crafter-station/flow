@@ -8,26 +8,6 @@ import type {
   PlacedNode,
 } from "../types";
 
-/**
- * Graph layout calculator for hierarchical structures.
- * Computes positions for nodes and generates edge paths.
- *
- * @example
- * ```typescript
- * const graph = new HierarchyGraph<MyNode>({
- *   gap: { x: 50, y: 50 },
- *   direction: "vertical",
- * });
- *
- * // Register sizes for all nodes
- * for (const node of getAllNodes(root)) {
- *   graph.registerSize(node.id, { width: 200, height: 100 });
- * }
- *
- * // Run layout
- * const { nodes, edges } = graph.compute(root);
- * ```
- */
 export class HierarchyGraph<T extends HierarchyNode> {
   private settings: Required<GraphConfig> & {
     tuning: Required<Required<GraphConfig>["tuning"]>;
@@ -54,53 +34,24 @@ export class HierarchyGraph<T extends HierarchyNode> {
         },
       },
     };
-
-    this.validateSettings();
     this.sizes = new Map();
   }
 
-  private validateSettings(): void {
-    ensure(this.settings.tuning.indent !== undefined, "Tuning indent must be defined");
-    ensure(this.settings.tuning.verticalShift !== undefined, "Tuning verticalShift must be defined");
-    ensure(this.settings.tuning.compression !== undefined, "Tuning compression must be defined");
-    ensure(this.settings.tuning.siblingFactor !== undefined, "Tuning siblingFactor must be defined");
-    ensure(this.settings.edges.vertical.spineGap !== undefined, "Edge spineGap must be defined");
-  }
-
-  /**
-   * Register measured size for a node.
-   * Must be called for all nodes before compute().
-   */
   registerSize(id: string, size: Dimensions): void {
     this.sizes.set(id, size);
   }
 
-  /**
-   * Check if all nodes have registered sizes.
-   */
   isReady(root: T): boolean {
     return this.traverse(root).every((n) => this.sizes.has(n.id));
   }
 
-  /**
-   * Compute positions for all nodes and generate edge paths.
-   * @throws Error if any node is missing size registration
-   */
   compute(root: T): GraphResult<T> {
-    ensure(
-      this.isReady(root),
-      `Cannot compute layout: missing sizes for some nodes. Have ${this.sizes.size} sizes.`
-    );
-
+    ensure(this.isReady(root), `Missing sizes for some nodes. Have ${this.sizes.size} sizes.`);
     const placed = this.placeNodes(root, 0, { x: 0, y: 0 });
     const edges = this.generateEdges(placed);
-
     return { nodes: placed, edges };
   }
 
-  /**
-   * Traverse hierarchy depth-first and return flat array
-   */
   traverse(root: T): T[] {
     const result: T[] = [root];
     if (root.children) {
@@ -111,28 +62,36 @@ export class HierarchyGraph<T extends HierarchyNode> {
     return result;
   }
 
+  regenerateEdges(placedWithOverrides: PlacedNode<T>[]): Edge<T>[] {
+    return this.generateEdges(placedWithOverrides);
+  }
+
+  getSubtreeIds(node: T): string[] {
+    const ids: string[] = [node.id];
+    if (node.children) {
+      for (const child of node.children) {
+        ids.push(...this.getSubtreeIds(child as T));
+      }
+    }
+    return ids;
+  }
+
   private resolveDirection(node: T): "vertical" | "horizontal" {
     return node.direction ?? this.settings.direction;
   }
 
-  /**
-   * Recursively place nodes respecting per-node direction settings.
-   */
   private placeNodes(node: T, depth: number, anchor: Coordinate): PlacedNode<T>[] {
     const placed: PlacedNode<T>[] = [];
     const nodeSize = this.sizes.get(node.id);
     ensure(nodeSize, `Missing size for node ${node.id}`);
 
-    // Position this node
     const pos = depth === 0 ? { x: 0, y: 0 } : anchor;
     placed.push({ data: node, position: pos, depth });
 
-    // Place children if present
     if (node.children && node.children.length > 0) {
       const flowDir = this.resolveDirection(node);
 
       if (flowDir === "vertical") {
-        // Stack children vertically below parent
         const heights = node.children.map((c) => this.measureHeight(c as T));
 
         node.children.forEach((child, idx) => {
@@ -140,27 +99,20 @@ export class HierarchyGraph<T extends HierarchyNode> {
           ensure(childSize, `Missing size for child ${child.id}`);
 
           const cx = pos.x - nodeSize.width / 2;
-          const cy = this.computeStackY(
-            pos.y + nodeSize.height / 2 + this.settings.gap.y,
-            idx,
-            heights
-          );
+          const cy = this.computeStackY(pos.y + nodeSize.height / 2 + this.settings.gap.y, idx, heights);
 
           const childPlaced = this.placeNodes(child as T, depth + 1, {
             x: cx + childSize.width / 2 + this.settings.tuning.indent,
             y: cy + this.settings.tuning.verticalShift,
           });
-
           placed.push(...childPlaced);
         });
       } else {
-        // Spread children horizontally beside parent
         const widths = node.children.map((c) => this.measureWidth(c as T));
 
         node.children.forEach((child, idx) => {
           const cx = this.computeSpreadX(pos.x, idx, widths);
           const cy = pos.y + nodeSize.height / 2 + this.settings.gap.y;
-
           const childSize = this.sizes.get(child.id);
           ensure(childSize, `Missing size for child ${child.id}`);
 
@@ -168,7 +120,6 @@ export class HierarchyGraph<T extends HierarchyNode> {
             x: cx,
             y: cy + childSize.height / 2,
           });
-
           placed.push(...childPlaced);
         });
       }
@@ -177,16 +128,11 @@ export class HierarchyGraph<T extends HierarchyNode> {
     return placed;
   }
 
-  /**
-   * Measure the width needed for a subtree.
-   */
   private measureWidth(node: T): number {
     const size = this.sizes.get(node.id);
     ensure(size, `Missing size for node ${node.id}`);
 
-    if (!node.children || node.children.length === 0) {
-      return size.width;
-    }
+    if (!node.children || node.children.length === 0) return size.width;
 
     const dir = this.resolveDirection(node);
 
@@ -197,22 +143,16 @@ export class HierarchyGraph<T extends HierarchyNode> {
       return Math.max(size.width, totalChild + gaps);
     }
 
-    // Vertical: width is node + compressed child width
     const childWidths = node.children.map((c) => this.measureWidth(c as T));
     const maxChild = Math.max(...childWidths);
     return size.width + this.settings.gap.x + maxChild * this.settings.tuning.compression;
   }
 
-  /**
-   * Measure the height needed for a subtree.
-   */
   private measureHeight(node: T): number {
     const size = this.sizes.get(node.id);
     ensure(size, `Missing size for node ${node.id}`);
 
-    if (!node.children || node.children.length === 0) {
-      return size.height;
-    }
+    if (!node.children || node.children.length === 0) return size.height;
 
     const dir = this.resolveDirection(node);
 
@@ -223,20 +163,13 @@ export class HierarchyGraph<T extends HierarchyNode> {
       return Math.max(size.height, totalChild + gaps);
     }
 
-    // Horizontal: height is node + tallest child
     const maxChild = Math.max(...node.children.map((c) => this.measureHeight(c as T)));
     return size.height + this.settings.gap.y + maxChild;
   }
 
-  /**
-   * Compute X position for horizontally spread children.
-   */
   private computeSpreadX(parentX: number, idx: number, widths: number[]): number {
     const count = widths.length;
-
-    if (count === 1) {
-      return parentX;
-    }
+    if (count === 1) return parentX;
 
     const totalWidth = widths.reduce((sum, w) => sum + w, 0);
     const totalGaps = (count - 1) * this.settings.gap.x;
@@ -251,27 +184,16 @@ export class HierarchyGraph<T extends HierarchyNode> {
     return x;
   }
 
-  /**
-   * Compute Y position for vertically stacked children.
-   */
   private computeStackY(startY: number, idx: number, heights: number[]): number {
-    let y = startY;
-
-    y += heights[0] / 2;
+    let y = startY + heights[0] / 2;
 
     for (let i = 0; i < idx; i++) {
-      y +=
-        heights[i] / 2 +
-        this.settings.gap.y * this.settings.tuning.siblingFactor +
-        heights[i + 1] / 2;
+      y += heights[i] / 2 + this.settings.gap.y * this.settings.tuning.siblingFactor + heights[i + 1] / 2;
     }
 
     return y;
   }
 
-  /**
-   * Generate edge paths between placed nodes.
-   */
   private generateEdges(placed: PlacedNode<T>[]): Edge<T>[] {
     const edges: Edge<T>[] = [];
     const positionMap = new Map(placed.map((p) => [p.data.id, p]));
@@ -295,51 +217,59 @@ export class HierarchyGraph<T extends HierarchyNode> {
         const childBounds = getBounds(childPlaced.position, childSize);
         const waypoints = this.computeEdgePath(p.position, bounds, childPlaced.position, childBounds, dir);
 
-        edges.push({
-          source: p.data,
-          target: childPlaced.data as T,
-          waypoints,
-        });
+        edges.push({ source: p.data, target: childPlaced.data as T, waypoints });
       }
     }
 
     return edges;
   }
 
-  /**
-   * Compute edge path between source and target.
-   *
-   * Vertical: Creates a spine-and-branch pattern
-   * Horizontal: Creates a stepped Z-pattern
-   */
   private computeEdgePath(
     srcPos: Coordinate,
     srcBounds: ReturnType<typeof getBounds>,
     tgtPos: Coordinate,
     tgtBounds: ReturnType<typeof getBounds>,
-    dir: "vertical" | "horizontal"
+    _dir: "vertical" | "horizontal"
   ): Coordinate[] {
-    if (dir === "vertical") {
-      const spineX =
-        srcBounds.left -
-        this.settings.edges.vertical.spineOffset +
-        this.settings.edges.vertical.spineGap;
+    const dx = tgtPos.x - srcPos.x;
+    const dy = tgtPos.y - srcPos.y;
 
+    if (Math.abs(dy) > Math.abs(dx) * 0.5 && dy > 0) {
+      const midY = srcBounds.bottom + (tgtBounds.top - srcBounds.bottom) / 2;
       return [
-        { x: spineX, y: srcPos.y },
-        { x: spineX, y: tgtPos.y },
+        { x: srcPos.x, y: srcBounds.bottom },
+        { x: srcPos.x, y: midY },
+        { x: tgtPos.x, y: midY },
+        { x: tgtPos.x, y: tgtBounds.top },
+      ];
+    }
+
+    if (Math.abs(dy) > Math.abs(dx) * 0.5 && dy < 0) {
+      const midY = srcBounds.top + (tgtBounds.bottom - srcBounds.top) / 2;
+      return [
+        { x: srcPos.x, y: srcBounds.top },
+        { x: srcPos.x, y: midY },
+        { x: tgtPos.x, y: midY },
+        { x: tgtPos.x, y: tgtBounds.bottom },
+      ];
+    }
+
+    if (dx > 0) {
+      const midX = srcBounds.right + (tgtBounds.left - srcBounds.right) / 2;
+      return [
+        { x: srcBounds.right, y: srcPos.y },
+        { x: midX, y: srcPos.y },
+        { x: midX, y: tgtPos.y },
         { x: tgtBounds.left, y: tgtPos.y },
       ];
     }
 
-    const gap = tgtBounds.top - srcBounds.bottom;
-    const midY = srcBounds.bottom + gap * 0.5;
-
+    const midX = srcBounds.left + (tgtBounds.right - srcBounds.left) / 2;
     return [
-      { x: srcPos.x, y: srcBounds.bottom },
-      { x: srcPos.x, y: midY },
-      { x: tgtPos.x, y: midY },
-      { x: tgtPos.x, y: tgtBounds.top },
+      { x: srcBounds.left, y: srcPos.y },
+      { x: midX, y: srcPos.y },
+      { x: midX, y: tgtPos.y },
+      { x: tgtBounds.right, y: tgtPos.y },
     ];
   }
 }
@@ -353,11 +283,6 @@ function getBounds(pos: Coordinate, size: Dimensions) {
   };
 }
 
-/**
- * Assert that a condition is truthy, throw otherwise.
- */
 export function ensure(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message);
-  }
+  if (!condition) throw new Error(message);
 }

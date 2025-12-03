@@ -108,3 +108,74 @@ export type GraphResult<T extends HierarchyNode> = {
  * ```
  */
 export type SizeFn<T extends HierarchyNode> = (node: T) => Dimensions;
+
+// ============================================================================
+// Drag-and-Drop Types
+// ============================================================================
+
+/**
+ * Drag mode configuration for nodes.
+ * - "node": Drag only the selected node
+ * - "subtree": Drag the node and all its descendants
+ * - false: Disable dragging
+ */
+export type DragMode = "node" | "subtree" | false;
+
+/**
+ * Map of node IDs to position overrides.
+ * When a node has an override, it uses this position instead of the calculated one.
+ */
+export type PositionOverrides = Map<string, Coordinate>;
+
+/**
+ * Event fired when a node drag operation ends.
+ */
+export type NodeDragEvent<T extends HierarchyNode> = {
+  /** The dragged node */
+  node: T;
+  /** All nodes that were moved (node itself, or subtree if dragMode="subtree") */
+  affectedNodes: T[];
+  /** The delta from original position */
+  delta: Coordinate;
+  /** New position for the dragged node */
+  newPosition: Coordinate;
+};
+
+// ============================================================================
+// View State Types
+// ============================================================================
+
+/**
+ * Current view state of the canvas (pan and zoom).
+ */
+export type ViewState = {
+  zoom: number;
+  pan: Coordinate;
+};
+
+// ============================================================================
+// Export Types
+// ============================================================================
+
+/**
+ * Exported data structure containing all graph information.
+ */
+export type ExportData<T extends HierarchyNode> = {
+  nodes: Array<{
+    id: string;
+    data: T;
+    position: Coordinate;
+    size: Dimensions;
+  }>;
+  edges: Array<{
+    sourceId: string;
+    targetId: string;
+    waypoints: Coordinate[];
+  }>;
+  bounds: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  };
+};
