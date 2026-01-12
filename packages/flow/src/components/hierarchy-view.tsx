@@ -237,8 +237,15 @@ export function HierarchyView<T extends HierarchyNode>({
       <g className="nodes">
         {layout.nodes.map((placed) => {
           const parent = parentLookup.get(placed.data.id);
-          const position = positionLookup.get(placed.data.id) ?? placed.position;
+          let position = positionLookup.get(placed.data.id) ?? placed.position;
           const isSelected = selectedNodeId === placed.data.id;
+
+          if (liveDrag && liveAffectedIds.has(placed.data.id) && placed.data.id !== liveDrag.nodeId) {
+            position = {
+              x: position.x + liveDrag.delta.x,
+              y: position.y + liveDrag.delta.y,
+            };
+          }
 
           if (dragMode) {
             return (

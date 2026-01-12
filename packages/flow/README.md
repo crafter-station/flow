@@ -1,4 +1,4 @@
-# @crafter-station/flow
+# @crafter/flow
 
 A zero-dependency tree layout and infinite canvas library for React. Build interactive hierarchy visualizations with pan, zoom, and animated connections.
 
@@ -14,17 +14,17 @@ A zero-dependency tree layout and infinite canvas library for React. Build inter
 ## Installation
 
 ```bash
-npm install @crafter-station/flow
+npm install @crafter/flow
 # or
-pnpm add @crafter-station/flow
+pnpm add @crafter/flow
 # or
-bun add @crafter-station/flow
+bun add @crafter/flow
 ```
 
 ## Quick Start
 
 ```tsx
-import { ZoomableCanvas, HierarchyView, type HierarchyNode } from "@crafter-station/flow";
+import { ZoomableCanvas, HierarchyView, type HierarchyNode } from "@crafter/flow";
 
 // Define your node type
 type MyNode = HierarchyNode & {
@@ -175,7 +175,7 @@ animation={{
 Low-level layout calculation for advanced use cases.
 
 ```tsx
-import { HierarchyGraph, type HierarchyNode } from "@crafter-station/flow";
+import { HierarchyGraph, type HierarchyNode } from "@crafter/flow";
 
 const graph = new HierarchyGraph<MyNode>({
   gap: { x: 50, y: 50 },
@@ -198,7 +198,7 @@ const { nodes, edges } = graph.compute(root);
 Path command helpers for custom edge rendering.
 
 ```tsx
-import { compilePath, moveTo, lineTo, curveTo } from "@crafter-station/flow";
+import { compilePath, moveTo, lineTo, curveTo } from "@crafter/flow";
 
 const d = compilePath([
   moveTo({ x: 0, y: 0 }),
@@ -220,7 +220,7 @@ import type {
   GraphConfig,        // Layout configuration
   SizeFn,             // (node: T) => { width, height }
   Edge,               // Source-target edge with waypoints
-} from "@crafter-station/flow";
+} from "@crafter/flow";
 ```
 
 ## Styling
