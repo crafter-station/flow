@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, type PropsWithChildren } from "react";
 import type { Coordinate } from "../types";
 
 const DRAG_THRESHOLD = 3;
+const FO_SIZE = 4000;
+const FO_OFFSET = FO_SIZE / 2;
 
 export type DraggableNodeContainerProps = PropsWithChildren<{
   id: string;
@@ -45,15 +47,15 @@ export function DraggableNodeContainer({
   const applyVisualTransform = useCallback((delta: Coordinate) => {
     const fo = foreignObjectRef.current;
     if (!fo) return;
-    fo.setAttribute("x", String(position.x + delta.x));
-    fo.setAttribute("y", String(position.y + delta.y));
+    fo.setAttribute("x", String(position.x + delta.x - FO_OFFSET));
+    fo.setAttribute("y", String(position.y + delta.y - FO_OFFSET));
   }, [position]);
 
   const resetVisualTransform = useCallback(() => {
     const fo = foreignObjectRef.current;
     if (!fo) return;
-    fo.setAttribute("x", String(position.x));
-    fo.setAttribute("y", String(position.y));
+    fo.setAttribute("x", String(position.x - FO_OFFSET));
+    fo.setAttribute("y", String(position.y - FO_OFFSET));
   }, [position]);
 
   const scheduleUpdate = useCallback(() => {
@@ -193,12 +195,11 @@ export function DraggableNodeContainer({
   return (
     <foreignObject
       ref={foreignObjectRef}
-      x={position.x}
-      y={position.y}
-      width={1}
-      height={1}
-      overflow="visible"
-      style={{ willChange: draggable ? "transform" : undefined }}
+      x={position.x - FO_OFFSET}
+      y={position.y - FO_OFFSET}
+      width={FO_SIZE}
+      height={FO_SIZE}
+      style={{ overflow: "visible", pointerEvents: "none", willChange: draggable ? "transform" : undefined }}
     >
       <div
         ref={containerRef}
@@ -207,12 +208,13 @@ export function DraggableNodeContainer({
         data-selected={selected ? "true" : undefined}
         style={{
           position: "absolute",
-          left: 0,
-          top: 0,
+          left: FO_OFFSET,
+          top: FO_OFFSET,
           transform: "translate(-50%, -50%)",
           cursor: draggable ? "grab" : "default",
           userSelect: "none",
           touchAction: "none",
+          pointerEvents: "auto",
           willChange: draggable ? "transform" : undefined,
         }}
         onPointerDown={handlePointerDown}

@@ -1,6 +1,6 @@
 {
   "name": "@crafter/flow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A zero-dependency tree layout and infinite canvas library for React",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
