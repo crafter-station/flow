@@ -8,7 +8,8 @@
     "dev:www": "turbo run dev --filter=www",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run typecheck"
+    "check-types": "turbo run typecheck",
+    "test": "turbo run test"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

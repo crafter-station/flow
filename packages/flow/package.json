@@ -21,7 +21,8 @@
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "test": "bun test"
   },
   "keywords": [
     "react",
