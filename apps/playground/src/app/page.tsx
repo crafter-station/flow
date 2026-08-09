@@ -13,7 +13,7 @@ import {
   type NodeDragEvent,
   type PositionOverrides,
   type Coordinate,
-} from "@crafter-station/flow";
+} from "@crafter/flow";
 import { useState, useMemo, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -217,7 +217,7 @@ export default function PlaygroundPage() {
       {/* Sidebar */}
       <div className="w-80 border-r bg-background p-4 flex flex-col gap-4 overflow-y-auto">
         <div>
-          <h1 className="text-xl font-bold">@crafter-station/flow</h1>
+          <h1 className="text-xl font-bold">@crafter/flow</h1>
           <p className="text-sm text-muted-foreground">
             Playground for testing the flow package
           </p>

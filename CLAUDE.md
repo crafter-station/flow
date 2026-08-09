@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`@crafter-station/flow` is a zero-dependency tree layout and infinite canvas library for React. It provides generic layout primitives for visualizing hierarchical data structures with animated connections.
+`@crafter/flow` is a zero-dependency tree layout and infinite canvas library for React. It provides generic layout primitives for visualizing hierarchical data structures with animated connections.
 
 ## Monorepo Structure
 
-- `packages/flow/` - Core library (`@crafter-station/flow`)
+- `packages/flow/` - Core library (`@crafter/flow`)
 - `apps/playground/` - Interactive testing app (port 3001)
 - `apps/www/` - Documentation website (port 3000)
 
@@ -76,7 +76,7 @@ type SizeFn<T> = (node: T) => { width: number; height: number };
 
 Apps use workspace protocol to reference the flow package:
 ```json
-"@crafter-station/flow": "workspace:*"
+"@crafter/flow": "workspace:*"
 ```
 
 Turborepo ensures `packages/flow` builds before dependent apps.

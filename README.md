@@ -1,4 +1,4 @@
-# @crafter-station/flow
+# @crafter/flow
 
 A zero-dependency tree layout and infinite canvas library for React.
 
@@ -15,7 +15,7 @@ A zero-dependency tree layout and infinite canvas library for React.
 
 | Package | Description | Version |
 |---------|-------------|---------|
-| [`@crafter-station/flow`](./packages/flow) | Core flow library | 0.1.0 |
+| [`@crafter/flow`](./packages/flow) | Core flow library | 0.1.0 |
 
 ## Apps
 
@@ -46,7 +46,7 @@ bun run dev:www
 ## Quick Example
 
 ```tsx
-import { ZoomableCanvas, HierarchyView, type HierarchyNode } from "@crafter-station/flow";
+import { ZoomableCanvas, HierarchyView, type HierarchyNode } from "@crafter/flow";
 
 type MyNode = HierarchyNode & { label: string };
 

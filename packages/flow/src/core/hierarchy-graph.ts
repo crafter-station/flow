@@ -18,6 +18,14 @@ export class HierarchyGraph<T extends HierarchyNode> {
   private sizes: Map<string, Dimensions>;
 
   constructor(config: GraphConfig) {
+    ensure(
+      config && typeof config === "object",
+      "HierarchyGraph requires a config object, e.g. new HierarchyGraph({ gap: { x: 50, y: 50 } })"
+    );
+    ensure(
+      config.gap && typeof config.gap.x === "number" && typeof config.gap.y === "number",
+      "HierarchyGraph config requires gap: { x: number, y: number }"
+    );
     this.settings = {
       gap: config.gap,
       direction: config.direction ?? "horizontal",
@@ -52,13 +60,28 @@ export class HierarchyGraph<T extends HierarchyNode> {
     return { nodes: placed, edges };
   }
 
+  /**
+   * Depth-first list of every node reachable from `root`.
+   *
+   * The layout is a tree: each node is visited once. A node reached twice
+   * (shared child, or a cycle) is skipped the second time, so a malformed
+   * graph degrades to its spanning tree instead of duplicating nodes or
+   * overflowing the stack.
+   */
   traverse(root: T): T[] {
-    const result: T[] = [root];
-    if (root.children) {
-      for (const child of root.children) {
-        result.push(...this.traverse(child as T));
+    const result: T[] = [];
+    const seen = new Set<string>();
+
+    const walk = (node: T): void => {
+      if (seen.has(node.id)) return;
+      seen.add(node.id);
+      result.push(node);
+      if (node.children) {
+        for (const child of node.children) walk(child as T);
       }
-    }
+    };
+
+    walk(root);
     return result;
   }
 
@@ -67,21 +90,23 @@ export class HierarchyGraph<T extends HierarchyNode> {
   }
 
   getSubtreeIds(node: T): string[] {
-    const ids: string[] = [node.id];
-    if (node.children) {
-      for (const child of node.children) {
-        ids.push(...this.getSubtreeIds(child as T));
-      }
-    }
-    return ids;
+    return this.traverse(node).map((n) => n.id);
   }
 
   private resolveDirection(node: T): "vertical" | "horizontal" {
     return node.direction ?? this.settings.direction;
   }
 
-  private placeNodes(node: T, depth: number, anchor: Coordinate): PlacedNode<T>[] {
+  private placeNodes(
+    node: T,
+    depth: number,
+    anchor: Coordinate,
+    seen: Set<string> = new Set()
+  ): PlacedNode<T>[] {
     const placed: PlacedNode<T>[] = [];
+    if (seen.has(node.id)) return placed;
+    seen.add(node.id);
+
     const nodeSize = this.sizes.get(node.id);
     ensure(nodeSize, `Missing size for node ${node.id}`);
 
@@ -104,7 +129,7 @@ export class HierarchyGraph<T extends HierarchyNode> {
           const childPlaced = this.placeNodes(child as T, depth + 1, {
             x: cx + childSize.width / 2 + this.settings.tuning.indent,
             y: cy + this.settings.tuning.verticalShift,
-          });
+          }, seen);
           placed.push(...childPlaced);
         });
       } else {
@@ -119,7 +144,7 @@ export class HierarchyGraph<T extends HierarchyNode> {
           const childPlaced = this.placeNodes(child as T, depth + 1, {
             x: cx,
             y: cy + childSize.height / 2,
-          });
+          }, seen);
           placed.push(...childPlaced);
         });
       }
@@ -128,42 +153,47 @@ export class HierarchyGraph<T extends HierarchyNode> {
     return placed;
   }
 
-  private measureWidth(node: T): number {
+  private measureWidth(node: T, seen: Set<string> = new Set()): number {
     const size = this.sizes.get(node.id);
     ensure(size, `Missing size for node ${node.id}`);
+
+    if (seen.has(node.id)) return size.width;
+    seen.add(node.id);
 
     if (!node.children || node.children.length === 0) return size.width;
 
     const dir = this.resolveDirection(node);
+    const childWidths = node.children.map((c) => this.measureWidth(c as T, seen));
 
     if (dir === "horizontal") {
-      const childWidths = node.children.map((c) => this.measureWidth(c as T));
       const totalChild = childWidths.reduce((sum, w) => sum + w, 0);
       const gaps = (node.children.length - 1) * this.settings.gap.x;
       return Math.max(size.width, totalChild + gaps);
     }
 
-    const childWidths = node.children.map((c) => this.measureWidth(c as T));
     const maxChild = Math.max(...childWidths);
     return size.width + this.settings.gap.x + maxChild * this.settings.tuning.compression;
   }
 
-  private measureHeight(node: T): number {
+  private measureHeight(node: T, seen: Set<string> = new Set()): number {
     const size = this.sizes.get(node.id);
     ensure(size, `Missing size for node ${node.id}`);
+
+    if (seen.has(node.id)) return size.height;
+    seen.add(node.id);
 
     if (!node.children || node.children.length === 0) return size.height;
 
     const dir = this.resolveDirection(node);
+    const childHeights = node.children.map((c) => this.measureHeight(c as T, seen));
 
     if (dir === "vertical") {
-      const childHeights = node.children.map((c) => this.measureHeight(c as T));
       const totalChild = childHeights.reduce((sum, h) => sum + h, 0);
       const gaps = (node.children.length - 1) * this.settings.gap.y;
       return Math.max(size.height, totalChild + gaps);
     }
 
-    const maxChild = Math.max(...node.children.map((c) => this.measureHeight(c as T)));
+    const maxChild = Math.max(...childHeights);
     return size.height + this.settings.gap.y + maxChild;
   }
 

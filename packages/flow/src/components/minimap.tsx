@@ -76,6 +76,20 @@ export function Minimap<T extends HierarchyNode>({
   className,
   borderRadius = 4,
 }: MinimapProps<T>) {
+  if (!Array.isArray(nodes)) {
+    throw new Error(
+      "Minimap requires a `nodes` array from the layout, e.g. <Minimap nodes={layout.nodes} nodeSize={nodeSize} viewport={{ ...view, width, height }} />"
+    );
+  }
+  if (typeof nodeSize !== "function") {
+    throw new Error("Minimap requires a `nodeSize` function, the same one passed to HierarchyView");
+  }
+  if (!viewport) {
+    throw new Error(
+      "Minimap requires a `viewport` object: { pan: { x, y }, zoom, width, height }"
+    );
+  }
+
   // Calculate content bounds
   const bounds = useMemo(() => {
     if (nodes.length === 0) {
