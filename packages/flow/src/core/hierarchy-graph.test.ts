@@ -163,6 +163,34 @@ describe("links", () => {
     const cross = edges.find((e) => e.kind === "cross");
     expect(cross?.waypoints.length).toBeGreaterThanOrEqual(2);
   });
+
+  test("a cross edge bows away from the row it spans", () => {
+    const { edges, nodes } = graph(flat, withLink).compute(flat);
+    const cross = edges.find((e) => e.kind === "cross");
+    const rowY = nodes.find((n) => n.data.id === "a")?.position.y ?? 0;
+    const highest = Math.min(...(cross?.waypoints.map((p) => p.y) ?? []));
+    expect(highest).toBeLessThan(rowY);
+  });
+
+  test("edges spanning different distances bow to different heights", () => {
+    const wide: Node = {
+      id: "root",
+      children: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }],
+    };
+    const { edges } = graph(wide, {
+      links: [
+        { source: "a", target: "b" },
+        { source: "a", target: "d" },
+      ],
+    }).compute(wide);
+
+    const crest = (target: string) => {
+      const edge = edges.find((e) => e.kind === "cross" && e.target.id === target);
+      return Math.min(...(edge?.waypoints.map((p) => p.y) ?? []));
+    };
+
+    expect(crest("d")).toBeLessThan(crest("b"));
+  });
 });
 
 describe("getSubtreeIds", () => {

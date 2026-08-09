@@ -275,23 +275,63 @@ export class HierarchyGraph<T extends HierarchyNode> {
       const targetSize = this.sizes.get(link.target);
       if (!sourceSize || !targetSize) continue;
 
-      const waypoints = this.computeEdgePath(
-        source.position,
-        getBounds(source.position, sourceSize),
-        target.position,
-        getBounds(target.position, targetSize),
-        this.resolveDirection(source.data as T)
-      );
-
       edges.push({
         source: source.data as T,
         target: target.data as T,
-        waypoints,
+        waypoints: this.computeCrossPath(
+          source.position,
+          getBounds(source.position, sourceSize),
+          target.position,
+          getBounds(target.position, targetSize)
+        ),
         kind: "cross",
       });
     }
 
     return edges;
+  }
+
+  /**
+   * Path for a relation the tree does not own.
+   *
+   * Tree edges route orthogonally through the midpoint between two rows,
+   * which is right for a parent reaching its child and wrong for a link
+   * spanning the layout: every long edge lands on the same midline and the
+   * set reads as one band instead of many relations.
+   *
+   * A cross edge instead leaves from the side of each node and bows away
+   * from the row, by an amount that grows with the horizontal distance it
+   * covers. Neighbours stay nearly flat, distant pairs arc high, and edges
+   * sharing a row separate because they span different distances.
+   */
+  private computeCrossPath(
+    srcPos: Coordinate,
+    srcBounds: ReturnType<typeof getBounds>,
+    tgtPos: Coordinate,
+    tgtBounds: ReturnType<typeof getBounds>
+  ): Coordinate[] {
+    const goingRight = tgtPos.x >= srcPos.x;
+    const start = {
+      x: goingRight ? srcBounds.right : srcBounds.left,
+      y: srcPos.y,
+    };
+    const end = {
+      x: goingRight ? tgtBounds.left : tgtBounds.right,
+      y: tgtPos.y,
+    };
+
+    const span = Math.abs(end.x - start.x);
+    if (span < 1) return [start, end];
+
+    // Bow above the row, deeper the further the edge travels, so that two
+    // edges on the same row are only confusable if they span the same width.
+    const lift = Math.min(span * 0.28, this.settings.gap.y * 6);
+    const crest = Math.min(start.y, end.y) - lift;
+
+    const first = { x: start.x + (end.x - start.x) * 0.25, y: crest };
+    const second = { x: start.x + (end.x - start.x) * 0.75, y: crest };
+
+    return [start, first, second, end];
   }
 
   private computeEdgePath(

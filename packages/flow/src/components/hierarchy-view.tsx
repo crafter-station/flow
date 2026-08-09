@@ -31,6 +31,21 @@ export type HierarchyViewProps<T extends HierarchyNode> = {
    * can be styled differently (dashed, dimmed) instead of reading as structure.
    */
   renderEdge?: (waypoints: Coordinate[], source: T, target: T, kind: EdgeKind) => React.ReactNode;
+  /**
+   * Fires when the pointer enters or leaves a node, with `null` on leave.
+   *
+   * Pair it with `focusedNodeId` to let a viewer isolate one node's relations:
+   * in a dense graph the edges overlap, and dimming everything unrelated is
+   * what turns "many connections exist" into "this node connects to these".
+   */
+  onNodeHover?: (node: T | null) => void;
+  /**
+   * Node to isolate. Its own edges and the nodes at their ends stay at full
+   * strength; everything else is dimmed to `dimmedOpacity`. Nothing moves.
+   */
+  focusedNodeId?: string | null;
+  /** Opacity applied to everything unrelated to `focusedNodeId` (default: 0.12) */
+  dimmedOpacity?: number;
   dragMode?: DragMode;
   positionOverrides?: PositionOverrides;
   onNodeDragEnd?: (event: NodeDragEvent<T>) => void;
@@ -48,6 +63,9 @@ export function HierarchyView<T extends HierarchyNode>({
   renderNode,
   renderEdge,
   onNodeClick,
+  onNodeHover,
+  focusedNodeId,
+  dimmedOpacity = 0.12,
   dragMode = false,
   positionOverrides,
   onNodeDragEnd,
@@ -199,6 +217,28 @@ export function HierarchyView<T extends HierarchyNode>({
     return new Set(ids);
   }, [liveDrag, nodeLookup, dragMode, getSubtreeIds]);
 
+  const handlePointerOver = useCallback(
+    (e: React.PointerEvent<SVGGElement>) => {
+      if (!onNodeHover) return;
+      let target = e.target as HTMLElement | SVGElement | null;
+      while (target && target !== e.currentTarget) {
+        const nodeId = target.getAttribute?.("data-node-id");
+        if (nodeId) {
+          const node = nodeLookup.get(nodeId);
+          if (node) onNodeHover(node);
+          return;
+        }
+        target = target.parentElement as HTMLElement | SVGElement | null;
+      }
+      onNodeHover(null);
+    },
+    [onNodeHover, nodeLookup]
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    onNodeHover?.(null);
+  }, [onNodeHover]);
+
   const displayEdges = useMemo(() => {
     if (effectiveOverrides.size === 0 && !liveDrag) {
       return layout.edges;
@@ -223,22 +263,40 @@ export function HierarchyView<T extends HierarchyNode>({
     );
   }, [layout, effectiveOverrides, graph, positionLookup, liveDrag, liveAffectedIds]);
 
+  const relatedIds = useMemo(() => {
+    if (!focusedNodeId) return null;
+    const ids = new Set<string>([focusedNodeId]);
+    for (const edge of displayEdges) {
+      if (edge.source.id === focusedNodeId) ids.add(edge.target.id);
+      else if (edge.target.id === focusedNodeId) ids.add(edge.source.id);
+    }
+    return ids;
+  }, [focusedNodeId, displayEdges]);
+
+  const opacityFor = useCallback(
+    (...ids: string[]) => {
+      if (!relatedIds) return 1;
+      return ids.every((id) => relatedIds.has(id)) ? 1 : dimmedOpacity;
+    },
+    [relatedIds, dimmedOpacity]
+  );
+
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: Click bubbling for node selection
-    <g onClick={handleClick}>
+    <g onClick={handleClick} onPointerOver={handlePointerOver} onPointerLeave={handlePointerLeave}>
       <g className="edges">
-        {displayEdges.map((edge) =>
-          renderEdge ? (
-            renderEdge(edge.waypoints, edge.source, edge.target, edge.kind ?? "tree")
-          ) : (
-            <EdgePath
-              key={`${edge.kind ?? "tree"}-${edge.source.id}-${edge.target.id}`}
-              waypoints={edge.waypoints}
-              animation={edgeAnimation}
-              color={edgeColor}
-            />
-          )
-        )}
+        {displayEdges.map((edge) => (
+          <g
+            key={`${edge.kind ?? "tree"}-${edge.source.id}-${edge.target.id}`}
+            opacity={opacityFor(edge.source.id, edge.target.id)}
+          >
+            {renderEdge ? (
+              renderEdge(edge.waypoints, edge.source, edge.target, edge.kind ?? "tree")
+            ) : (
+              <EdgePath waypoints={edge.waypoints} animation={edgeAnimation} color={edgeColor} />
+            )}
+          </g>
+        ))}
       </g>
 
       <g className="nodes">
