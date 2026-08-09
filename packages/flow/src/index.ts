@@ -5,6 +5,8 @@ export type {
   HierarchyNode,
   PlacedNode,
   Edge,
+  EdgeKind,
+  NodeLink,
   GraphConfig,
   GraphResult,
   SizeFn,

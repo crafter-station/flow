@@ -41,6 +41,7 @@ export class HierarchyGraph<T extends HierarchyNode> {
           spineGap: config.edges?.vertical?.spineGap ?? 20,
         },
       },
+      links: config.links ?? [],
     };
     this.sizes = new Map();
   }
@@ -247,8 +248,47 @@ export class HierarchyGraph<T extends HierarchyNode> {
         const childBounds = getBounds(childPlaced.position, childSize);
         const waypoints = this.computeEdgePath(p.position, bounds, childPlaced.position, childBounds, dir);
 
-        edges.push({ source: p.data, target: childPlaced.data as T, waypoints });
+        edges.push({ source: p.data, target: childPlaced.data as T, waypoints, kind: "tree" });
       }
+    }
+
+    edges.push(...this.generateCrossEdges(positionMap));
+
+    return edges;
+  }
+
+  /**
+   * Edges for relations the tree could not express. Positions come from the
+   * tree layout, so these only connect nodes that were already placed; a link
+   * naming an unplaced node is skipped rather than throwing, because the
+   * caller's graph legitimately holds more relations than one tree can show.
+   */
+  private generateCrossEdges(positionMap: Map<string, PlacedNode<T>>): Edge<T>[] {
+    const edges: Edge<T>[] = [];
+
+    for (const link of this.settings.links) {
+      const source = positionMap.get(link.source);
+      const target = positionMap.get(link.target);
+      if (!source || !target) continue;
+
+      const sourceSize = this.sizes.get(link.source);
+      const targetSize = this.sizes.get(link.target);
+      if (!sourceSize || !targetSize) continue;
+
+      const waypoints = this.computeEdgePath(
+        source.position,
+        getBounds(source.position, sourceSize),
+        target.position,
+        getBounds(target.position, targetSize),
+        this.resolveDirection(source.data as T)
+      );
+
+      edges.push({
+        source: source.data as T,
+        target: target.data as T,
+        waypoints,
+        kind: "cross",
+      });
     }
 
     return edges;

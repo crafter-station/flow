@@ -53,6 +53,28 @@ export type Edge<T extends HierarchyNode> = {
   source: T;
   target: T;
   waypoints: Coordinate[];
+  /**
+   * How this edge relates to the layout.
+   *
+   * `"tree"` edges follow the parent/child links the layout was built from.
+   * `"cross"` edges are extra relations supplied via `GraphConfig.links`:
+   * they are drawn between placed nodes but never move them.
+   *
+   * Absent on edges produced before this field existed; treat as `"tree"`.
+   */
+  kind?: EdgeKind;
+};
+
+export type EdgeKind = "tree" | "cross";
+
+/**
+ * A relation between two nodes that the tree layout cannot express, such as a
+ * node with more than one parent. Both ids must already be placed by the
+ * layout; a link naming an unplaced node is ignored.
+ */
+export type NodeLink = {
+  source: string;
+  target: string;
 };
 
 /**
@@ -83,6 +105,16 @@ export type GraphConfig = {
       spineGap?: number;
     };
   };
+  /**
+   * Extra relations to draw on top of the tree, for data that is a graph
+   * rather than a hierarchy (a node with several parents, a reference back
+   * to an ancestor).
+   *
+   * These never affect node positions: the layout stays a tree, and each link
+   * becomes an `Edge` with `kind: "cross"` between two already-placed nodes.
+   * Links naming a node the layout did not place are skipped.
+   */
+  links?: NodeLink[];
 };
 
 /**

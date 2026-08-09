@@ -3,6 +3,7 @@ import { HierarchyGraph } from "../core/hierarchy-graph";
 import type {
   Coordinate,
   DragMode,
+  EdgeKind,
   GraphConfig,
   HierarchyNode,
   NodeDragEvent,
@@ -24,7 +25,12 @@ export type HierarchyViewProps<T extends HierarchyNode> = {
   edgeColor?: string;
   onNodeClick?: (node: T) => void;
   renderNode: (node: T, parent?: T) => React.ReactNode;
-  renderEdge?: (waypoints: Coordinate[], source: T, target: T) => React.ReactNode;
+  /**
+   * Custom edge renderer. `kind` distinguishes the tree's own parent/child
+   * edges from the extra relations passed as `config.links`, so cross edges
+   * can be styled differently (dashed, dimmed) instead of reading as structure.
+   */
+  renderEdge?: (waypoints: Coordinate[], source: T, target: T, kind: EdgeKind) => React.ReactNode;
   dragMode?: DragMode;
   positionOverrides?: PositionOverrides;
   onNodeDragEnd?: (event: NodeDragEvent<T>) => void;
@@ -60,6 +66,7 @@ export function HierarchyView<T extends HierarchyNode>({
         direction: config?.direction ?? "vertical",
         tuning: config?.tuning,
         edges: config?.edges,
+        links: config?.links,
       }),
     [gap, config]
   );
@@ -222,10 +229,10 @@ export function HierarchyView<T extends HierarchyNode>({
       <g className="edges">
         {displayEdges.map((edge) =>
           renderEdge ? (
-            renderEdge(edge.waypoints, edge.source, edge.target)
+            renderEdge(edge.waypoints, edge.source, edge.target, edge.kind ?? "tree")
           ) : (
             <EdgePath
-              key={`${edge.source.id}-${edge.target.id}`}
+              key={`${edge.kind ?? "tree"}-${edge.source.id}-${edge.target.id}`}
               waypoints={edge.waypoints}
               animation={edgeAnimation}
               color={edgeColor}
